@@ -211,6 +211,27 @@ separately.
 - `docs/adr/000X-title.md` (architecture decision records)
 - `database/seeders/{ClientSeeder,InstrumentSeeder,TransactionSeeder}.php`
 
+## Regression test seeds — must appear in Phase 7's suite, not generalized away
+
+Specific scenarios already confirmed correct in earlier phases. Phase 7
+must test these exact cases, not a vaguer generic equivalent:
+- Withdrawal exactly equal to balance succeeds, landing on 0.00 (boundary,
+  not rejection) — Phase 4.
+- InsufficientFundsException message uses the client's actual currency
+  (tested with EUR), never a hardcoded "USD" — Phase 4.
+- POST to a nonexistent client returns a clean {"error_code":"not_found",
+  "message":...} 404 with no debug stack trace, regardless of APP_DEBUG —
+  Phase 4.
+- The exact Ana scenario end-to-end (deposit 1000 → buy 5@100 → reject
+  buy 700 → reject sell 8 → buy exactly remaining cash → redeposit → sell
+  3@120 → sell remaining 2) as a single ordered integration test — Phase 5.
+- Selling an instrument down to exactly zero holdings makes it ABSENT from
+  the portfolio response, never present with quantity: 0. This was a real
+  bug (SQLite HAVING-alias collision with the real transactions.quantity
+  column) — this is the single highest-priority regression test in the
+  whole suite, not a generic "zero holdings" case.
+- insufficient_holdings error shape/message, parallel to insufficient_funds.
+
 ===
 
 <laravel-boost-guidelines>

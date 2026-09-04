@@ -4,15 +4,21 @@ namespace App\Services;
 
 use App\Enums\TransactionType;
 use App\Exceptions\InsufficientFundsException;
+use App\Exceptions\InsufficientHoldingsException;
 use App\Models\Client;
+use App\Models\Instrument;
 use App\Models\Transaction;
+use Brick\Math\RoundingMode;
 use Brick\Money\Money;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Deposit/withdraw only this phase — buy/sell come next phase (CLAUDE.md
- * rule 16: four separately-readable methods, not a shared abstraction
- * forced across them).
+ * Four separately-readable methods, no shared pipeline across them (rule
+ * 16): deposit/withdraw insert `amount`; buy/sell insert
+ * `instrument_id`/`quantity`/`price` and validate against a fundamentally
+ * different check (Money comparison vs. integer comparison). Extracting a
+ * generic "lock, check, insert" template would hide that difference behind
+ * a callback instead of leaving it readable inline.
  */
 class TransactionService
 {
@@ -56,6 +62,64 @@ class TransactionService
                 'client_id' => $locked->id,
                 'type' => TransactionType::Withdrawal,
                 'amount' => $amount,
+            ]);
+        });
+    }
+
+    public function buy(Client $client, Instrument $instrument, int $quantity, string $price): Transaction
+    {
+        return DB::transaction(function () use ($client, $instrument, $quantity, $price) {
+            $locked = Client::lockForUpdate()->findOrFail($client->id);
+
+            // total = quantity × price, full stop — transaction_fee (rule
+            // 12) has no effect here and is never referenced in this
+            // calculation. RoundingMode::Unnecessary is brick/money's
+            // default for multipliedBy(), but stated explicitly here
+            // rather than relied on implicitly: rule 15 guarantees this
+            // multiplication never needs rounding (quantity is always a
+            // whole integer), so if it ever did, that's a bug — this
+            // throws instead of silently rounding, and stays true even if
+            // the library's own default ever changes.
+            $total = Money::of($price, $locked->currency)->multipliedBy($quantity, RoundingMode::Unnecessary);
+            $balance = $this->portfolio->cashBalance($locked);
+
+            // rule 8: cash must never go negative. Spending exactly the
+            // full balance is allowed — only a total strictly greater than
+            // available cash is rejected, same boundary rule as withdraw().
+            if ($total->isGreaterThan($balance)) {
+                throw new InsufficientFundsException($locked, $total, $balance);
+            }
+
+            return Transaction::create([
+                'client_id' => $locked->id,
+                'type' => TransactionType::Buy,
+                'instrument_id' => $instrument->id,
+                'quantity' => $quantity,
+                'price' => $price,
+            ]);
+        });
+    }
+
+    public function sell(Client $client, Instrument $instrument, int $quantity, string $price): Transaction
+    {
+        return DB::transaction(function () use ($client, $instrument, $quantity, $price) {
+            $locked = Client::lockForUpdate()->findOrFail($client->id);
+
+            $held = $this->portfolio->holdingQuantity($locked, $instrument);
+
+            // rule 9: never sell more than currently held. Selling exactly
+            // the full held quantity (down to zero) is explicitly allowed
+            // — only a request strictly greater than held is rejected.
+            if ($quantity > $held) {
+                throw new InsufficientHoldingsException($locked, $instrument, $quantity, $held);
+            }
+
+            return Transaction::create([
+                'client_id' => $locked->id,
+                'type' => TransactionType::Sell,
+                'instrument_id' => $instrument->id,
+                'quantity' => $quantity,
+                'price' => $price,
             ]);
         });
     }
