@@ -153,6 +153,14 @@ GET  /api/clients/{client}/portfolio
 GET  /api/clients/{client}/transactions       # history, paginated
 ```
 
+**Confirmed in ADR-001..004 (Phase 1):** `POST /transactions` returns `201
+Created` with the persisted Transaction row on success. Rule-8/9 rejections
+return `422` with a machine-readable error code distinguishing the reason
+(`insufficient_funds`, `insufficient_holdings`, `unknown_instrument`) — not
+just a human-readable message — so a test/client can branch on it
+programmatically. Carry this through Phase 3 (validation) and Phase 6
+(endpoints) without re-deciding it.
+
 ## Directory conventions
 
 - `app/Enums/TransactionType.php`
