@@ -161,6 +161,19 @@ just a human-readable message — so a test/client can branch on it
 programmatically. Carry this through Phase 3 (validation) and Phase 6
 (endpoints) without re-deciding it.
 
+**Confirmed in Phase 3 validation work:** `amount` and `price` must be sent
+as JSON **strings** (`"10.50"`, not `10.50`), never bare JSON numbers. This
+was discovered empirically, not assumed: a bare JSON number `10.50` is
+indistinguishable from `10.5` once PHP parses it (the trailing zero has no
+representation in a float), so `decimal:2` cannot reliably enforce "exactly
+2 decimal places" against a bare number — only against a string. `quantity`
+has no equivalent issue (JSON integers don't lose precision) and stays a
+plain number. This is the same reasoning ADR-002 already established for
+internal arithmetic (`brick/money` never accepts a float) — it turns out to
+apply at the HTTP boundary too, not just inside the codebase. Carry this
+exact request shape through Phase 4/5 (service layer) and Phase 6/10
+(endpoint examples, README) without re-deciding it.
+
 ## Directory conventions
 
 - `app/Enums/TransactionType.php`
