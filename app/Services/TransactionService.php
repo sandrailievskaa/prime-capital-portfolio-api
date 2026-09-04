@@ -38,6 +38,13 @@ class TransactionService
                 'client_id' => $client->id,
                 'type' => TransactionType::Deposit,
                 'amount' => $amount,
+                // Explicit, not relied on as the column's DB-level default:
+                // Transaction::create() returns the in-memory instance built
+                // from what's passed in — it does NOT re-fetch DB-computed
+                // defaults after INSERT. Omitting this left every API
+                // response showing transaction_fee: null instead of the
+                // true "0.00" (found via adversarial QA, Phase 8).
+                'transaction_fee' => 0,
             ]);
         });
     }
@@ -62,6 +69,7 @@ class TransactionService
                 'client_id' => $locked->id,
                 'type' => TransactionType::Withdrawal,
                 'amount' => $amount,
+                'transaction_fee' => 0,
             ]);
         });
     }
@@ -96,6 +104,7 @@ class TransactionService
                 'instrument_id' => $instrument->id,
                 'quantity' => $quantity,
                 'price' => $price,
+                'transaction_fee' => 0,
             ]);
         });
     }
@@ -120,6 +129,7 @@ class TransactionService
                 'instrument_id' => $instrument->id,
                 'quantity' => $quantity,
                 'price' => $price,
+                'transaction_fee' => 0,
             ]);
         });
     }

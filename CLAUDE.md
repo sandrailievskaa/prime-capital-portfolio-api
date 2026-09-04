@@ -239,6 +239,11 @@ must test these exact cases, not a vaguer generic equivalent:
   column) — this is the single highest-priority regression test in the
   whole suite, not a generic "zero holdings" case.
 - insufficient_holdings error shape/message, parallel to insufficient_funds.
+- Every Transaction API response must show transaction_fee as "0.00", never
+  null — found in Phase 8 adversarial QA: Transaction::create()'s returned
+  in-memory instance doesn't reflect DB-computed defaults unless the field
+  is passed explicitly, so all 4 TransactionService methods now pass
+  'transaction_fee' => 0 explicitly.
 
 ===
 

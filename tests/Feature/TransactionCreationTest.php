@@ -27,6 +27,32 @@ class TransactionCreationTest extends TestCase
         $this->assertBalance($client, '250.00');
     }
 
+    /**
+     * Regression test (Phase 8, found via adversarial QA):
+     * Transaction::create() returns the in-memory instance built from the
+     * attributes passed to it — it does NOT re-fetch DB-computed column
+     * defaults after INSERT. Every TransactionService write method now
+     * passes transaction_fee explicitly for exactly this reason; before
+     * that fix, every successful response showed transaction_fee: null
+     * even though the actual DB row correctly held 0.00. This test checks
+     * both sides: the API response and a fresh read of the same row from
+     * the database.
+     */
+    public function test_transaction_fee_shows_zero_not_null_in_the_response_and_matches_the_database(): void
+    {
+        $client = $this->createClient();
+
+        $response = $this->postJson("/api/clients/{$client->id}/transactions", [
+            'type' => 'deposit',
+            'amount' => '10.00',
+        ])->assertStatus(201);
+
+        $response->assertJsonPath('data.transaction_fee', '0.00');
+
+        $fresh = \App\Models\Transaction::find($response->json('data.id'));
+        $this->assertSame('0.00', (string) $fresh->transaction_fee);
+    }
+
     public function test_withdrawal_within_balance_succeeds(): void
     {
         $client = $this->createClient();
@@ -240,6 +266,39 @@ class TransactionCreationTest extends TestCase
             'quantity' => 1,
         ])->assertStatus(422)
             ->assertJsonValidationErrors(['price', 'quantity']);
+    }
+
+    /**
+     * Adversarial QA (Phase 8): transaction_fee is not in
+     * CreateTransactionRequest::rules(), so it must be rejected by the
+     * same unknown-field mechanism as any other unrecognized key — never
+     * silently accepted or silently ignored.
+     */
+    public function test_transaction_fee_is_rejected_as_an_unknown_field_on_deposit(): void
+    {
+        $client = $this->createClient();
+
+        $this->postJson("/api/clients/{$client->id}/transactions", [
+            'type' => 'deposit',
+            'amount' => '100.00',
+            'transaction_fee' => '999.00',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('transaction_fee');
+    }
+
+    public function test_transaction_fee_is_rejected_as_an_unknown_field_on_buy(): void
+    {
+        $client = $this->createClient();
+        $instrument = $this->createInstrument();
+
+        $this->postJson("/api/clients/{$client->id}/transactions", [
+            'type' => 'buy',
+            'instrument_id' => $instrument->id,
+            'quantity' => 1,
+            'price' => '10.00',
+            'transaction_fee' => '999.00',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('transaction_fee');
     }
 
     // ── Atomicity: rejections leave zero trace ──────────────────────────
