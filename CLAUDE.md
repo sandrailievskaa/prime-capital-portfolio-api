@@ -159,7 +159,11 @@ return `422` with a machine-readable error code distinguishing the reason
 (`insufficient_funds`, `insufficient_holdings`, `unknown_instrument`) — not
 just a human-readable message — so a test/client can branch on it
 programmatically. Carry this through Phase 3 (validation) and Phase 6
-(endpoints) without re-deciding it.
+(endpoints) without re-deciding it. A nonexistent client (e.g.
+`POST /clients/999999/transactions`) returns `404` with `error_code:
+"not_found"` — same machine-readable-code principle as the 422s above, on
+a different status code since it isn't a rule-8/9 rejection. Implemented
+and tested in Phase 4.
 
 **Confirmed in Phase 3 validation work:** `amount` and `price` must be sent
 as JSON **strings** (`"10.50"`, not `10.50`), never bare JSON numbers. This
@@ -173,6 +177,27 @@ internal arithmetic (`brick/money` never accepts a float) — it turns out to
 apply at the HTTP boundary too, not just inside the codebase. Carry this
 exact request shape through Phase 4/5 (service layer) and Phase 6/10
 (endpoint examples, README) without re-deciding it.
+
+**Confirmed in Phase 4 (deposit/withdraw) — error response shape:** every
+error response carries `error_code` and `message`. An `errors` key
+(Laravel's standard per-field MessageBag) is present **only** on 422s
+originating from `CreateTransactionRequest` field validation. Business-rule
+rejections (`insufficient_funds`, `insufficient_holdings` once Phase 5
+lands) and `404 not_found` responses carry `{error_code, message}` with
+**no** `errors` key — deliberately, not an oversight: a business-rule
+rejection is a whole-request decision with no single field to blame, so a
+forced empty `errors: {}` would misleadingly imply a per-field breakdown
+that will never exist for that category. Phase 7 tests should assert
+`errors` is present for `CreateTransactionRequest` 422s and absent for
+`DomainRuleException`/404 responses — do not re-decide this shape then.
+
+**Confirmed in Phase 4:** `cashBalance()` deliberately avoids SQL `SUM()`
+over decimal columns — SQLite computes `SUM()` via IEEE-754 double
+internally, which isn't a precision guarantee at `decimal(15,2)`'s edge.
+Instead, individual Transaction rows are loaded and summed via Money
+arithmetic in PHP. This does NOT automatically extend to integer
+aggregates (e.g. holdings quantity) — see Phase 5 for that decision made
+separately.
 
 ## Directory conventions
 
