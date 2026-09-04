@@ -14,10 +14,9 @@ class TransactionResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'client_id' => $this->client_id,
             'type' => $this->type->value,
             'amount' => $this->amount,
-            'instrument_id' => $this->instrument_id,
+            'instrument' => $this->instrument ? InstrumentResource::make($this->instrument) : null,
             'quantity' => $this->quantity,
             'price' => $this->price,
             'transaction_fee' => $this->transaction_fee,

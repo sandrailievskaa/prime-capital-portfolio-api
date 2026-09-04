@@ -2,21 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Services\PortfolioService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\CreatesFixtures;
 use Tests\TestCase;
 
 class MultiClientIsolationTest extends TestCase
 {
-    use RefreshDatabase, CreatesFixtures;
+    use CreatesFixtures, RefreshDatabase;
 
-    /**
-     * Highest-risk case #5: one client's activity must never bleed into
-     * another's balance or holdings. Both clients transact on the same
-     * instrument deliberately, to catch an aggregate query that forgets
-     * to filter by client_id.
-     */
+    /** Both clients deliberately transact on the same instrument, to catch an aggregate query that forgets to filter by client. */
     public function test_two_clients_transactions_never_affect_each_others_balance_or_holdings(): void
     {
         $clientA = $this->createClient();
@@ -35,12 +29,10 @@ class MultiClientIsolationTest extends TestCase
             'type' => 'buy', 'instrument_id' => $instrument->id, 'quantity' => 3, 'price' => '50.00',
         ])->assertStatus(201);
 
-        $portfolio = app(PortfolioService::class);
-
-        $this->assertSame('500.00', (string) $portfolio->cashBalance($clientA)->getAmount());
-        $this->assertSame('350.00', (string) $portfolio->cashBalance($clientB)->getAmount());
-        $this->assertSame(10, $portfolio->holdingQuantity($clientA, $instrument));
-        $this->assertSame(3, $portfolio->holdingQuantity($clientB, $instrument));
+        $this->assertSame('500.00', (string) $clientA->cash_balance->getAmount());
+        $this->assertSame('350.00', (string) $clientB->cash_balance->getAmount());
+        $this->assertSame(10, $this->holdingQuantity($clientA, $instrument));
+        $this->assertSame(3, $this->holdingQuantity($clientB, $instrument));
 
         // A withdrawal that would be valid for A but not B must be judged
         // against B's own balance, not A's.
@@ -70,8 +62,7 @@ class MultiClientIsolationTest extends TestCase
         $response = $this->getJson("/api/clients/{$clientA->id}/transactions")->assertStatus(200);
 
         $response->assertJsonCount(2, 'data');
-        foreach ($response->json('data') as $row) {
-            $this->assertSame($clientA->id, $row['client_id']);
-        }
+        $amounts = collect($response->json('data'))->pluck('amount')->all();
+        $this->assertEqualsCanonicalizing(['10.00', '20.00'], $amounts);
     }
 }

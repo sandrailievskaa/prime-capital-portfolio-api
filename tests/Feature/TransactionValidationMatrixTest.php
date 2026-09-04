@@ -9,22 +9,12 @@ use Tests\TestCase;
 
 class TransactionValidationMatrixTest extends TestCase
 {
-    use RefreshDatabase, CreatesFixtures;
+    use CreatesFixtures, RefreshDatabase;
 
     /**
-     * CLAUDE.md regression seed (Phase 3): the full decimal-precision
-     * matrix, exercised through the real HTTP endpoint this time instead
-     * of a direct FormRequest call. Only a canonical decimal string
-     * ("10.50", "010.50") passes — everything else, including values that
-     * "look correct" as bare JSON numbers, must be rejected.
-     *
-     * Two Phase 3 conclusions changed here, and deliberately: leading and
-     * trailing whitespace were found to fail validation when Phase 3
-     * called the validator directly — but Laravel's global TrimStrings
-     * middleware normalizes both to "10.50" before this request ever
-     * reaches CreateTransactionRequest, so through the real HTTP pipeline
-     * they correctly succeed. This is exactly the gap between testing a
-     * component in isolation and testing the real boundary.
+     * Only a canonical decimal string ("10.50", "010.50") passes — bare
+     * JSON numbers are rejected even when they "look correct" (see
+     * app/Http/Requests/StoreTransactionRequest.php for why).
      *
      * @return array<string, array{0: mixed, 1: bool}>
      */
@@ -42,12 +32,7 @@ class TransactionValidationMatrixTest extends TestCase
             'string "abc" (not numeric)' => ['abc', false],
             'null' => [null, false],
             // Laravel's global TrimStrings middleware normalizes these to
-            // "10.50" before CreateTransactionRequest ever sees them — a
-            // real discovery from testing at the actual HTTP boundary
-            // instead of calling the validator in isolation (Phase 3's
-            // approach). The regex itself would reject raw whitespace if
-            // it ever reached it uncleaned; through the real request
-            // pipeline, it never does, so these correctly succeed.
+            // "10.50" before validation runs.
             'leading whitespace " 10.50" (trimmed by middleware first)' => [' 10.50', true],
             'trailing whitespace "10.50 " (trimmed by middleware first)' => ['10.50 ', true],
             'leading plus "+10.50"' => ['+10.50', false],

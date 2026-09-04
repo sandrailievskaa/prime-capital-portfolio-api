@@ -5,18 +5,10 @@ namespace Tests\Unit;
 use App\Enums\TransactionType;
 use App\Models\Client;
 use App\Models\Instrument;
-use App\Services\PortfolioService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-/**
- * Unit-level in the sense the framework intends here: no HTTP, direct
- * calls against hand-built ledger rows, to make the pure arithmetic
- * intent legible on its own — RefreshDatabase is still needed since the
- * calculation reads real rows via Eloquent, but nothing here goes through
- * a route or controller.
- */
-class PortfolioServiceCalculationTest extends TestCase
+class ClientLedgerCalculationTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -34,8 +26,7 @@ class PortfolioServiceCalculationTest extends TestCase
             'type' => TransactionType::Sell, 'instrument_id' => $instrument->id, 'quantity' => 1, 'price' => '80.00',
         ]);
 
-        // 1000 - 200 - 150 (3*50) + 80 (1*80) = 730
-        $balance = app(PortfolioService::class)->cashBalance($client);
+        $balance = $client->cash_balance;
 
         $this->assertSame('730.00', (string) $balance->getAmount());
         $this->assertSame('USD', $balance->getCurrency()->getCurrencyCode());
@@ -46,7 +37,7 @@ class PortfolioServiceCalculationTest extends TestCase
         $client = Client::create(['name' => 'Calc Client', 'currency' => 'USD']);
         $instrument = Instrument::create(['ticker' => 'NEVERBOUGHT']);
 
-        $quantity = app(PortfolioService::class)->holdingQuantity($client, $instrument);
+        $quantity = $client->holdings->firstWhere('instrument_id', $instrument->id)->quantity ?? 0;
 
         $this->assertSame(0, $quantity);
     }

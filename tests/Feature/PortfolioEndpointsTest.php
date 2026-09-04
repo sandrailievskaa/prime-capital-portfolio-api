@@ -8,7 +8,7 @@ use Tests\TestCase;
 
 class PortfolioEndpointsTest extends TestCase
 {
-    use RefreshDatabase, CreatesFixtures;
+    use CreatesFixtures, RefreshDatabase;
 
     public function test_cash_balance_endpoint_reflects_the_ledger(): void
     {
@@ -24,12 +24,7 @@ class PortfolioEndpointsTest extends TestCase
             ->assertJson(['data' => ['currency' => 'USD', 'balance' => '300.00']]);
     }
 
-    /**
-     * CLAUDE.md regression seed (Phase 4): the currency in every response
-     * comes from the client's own record — tested with a non-USD currency
-     * specifically because "it happened to say USD in my test" would not
-     * prove anything.
-     */
+    /** Non-USD deliberately, since a passing USD-only test wouldn't prove the currency isn't hardcoded. */
     public function test_cash_balance_uses_the_clients_actual_currency_not_a_hardcoded_usd(): void
     {
         $client = $this->createClient(currency: 'EUR');
@@ -44,10 +39,6 @@ class PortfolioEndpointsTest extends TestCase
             ->assertJson(['data' => ['currency' => 'EUR', 'balance' => '75.00']]);
     }
 
-    /**
-     * Same regression seed, business-rule-rejection side: the
-     * insufficient_funds message must name the client's real currency.
-     */
     public function test_insufficient_funds_message_uses_the_clients_actual_currency(): void
     {
         $client = $this->createClient(currency: 'EUR');
@@ -62,16 +53,7 @@ class PortfolioEndpointsTest extends TestCase
         $this->assertStringNotContainsString('USD', $response->json('message'));
     }
 
-    /**
-     * Same bug class as the insufficient_funds currency fix, checked for
-     * insufficient_holdings specifically since it was never explicitly
-     * re-tested there. Turns out the premise doesn't transfer literally:
-     * InsufficientHoldingsException's message is pure share-quantity
-     * arithmetic (int requested, int held) — no Money object, no currency
-     * of any kind. This test confirms that absence directly rather than
-     * just asserting it in prose: the message must name neither the
-     * client's real currency nor any hardcoded one.
-     */
+    /** InsufficientHoldingsException's message is pure quantity arithmetic — it must name no currency at all, not even the client's real one. */
     public function test_insufficient_holdings_message_contains_no_currency_at_all(): void
     {
         $client = $this->createClient(currency: 'EUR');
@@ -109,7 +91,7 @@ class PortfolioEndpointsTest extends TestCase
 
         $this->getJson("/api/clients/{$client->id}/portfolio")
             ->assertStatus(200)
-            ->assertJson(['data' => [['instrument_id' => $instrument->id, 'quantity' => 4]]]);
+            ->assertJson(['data' => [['instrument_id' => $instrument->id, 'ticker' => $instrument->ticker, 'quantity' => 4]]]);
     }
 
     public function test_transactions_endpoint_returns_paginated_history(): void
@@ -125,12 +107,7 @@ class PortfolioEndpointsTest extends TestCase
             ->assertJsonPath('meta.total', 2);
     }
 
-    /**
-     * CLAUDE.md regression seed (Phase 4): a nonexistent client must get a
-     * clean error_code/message 404, never a debug stack trace — tested
-     * with APP_DEBUG explicitly true, since that's precisely the
-     * condition that produced the original bug.
-     */
+    /** APP_DEBUG is forced true here since that's the exact condition that used to leak a stack trace. */
     public function test_nonexistent_client_returns_clean_404_even_with_debug_enabled(): void
     {
         config(['app.debug' => true]);

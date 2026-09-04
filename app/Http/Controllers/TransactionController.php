@@ -3,46 +3,42 @@
 namespace App\Http\Controllers;
 
 use App\Enums\TransactionType;
-use App\Http\Requests\CreateTransactionRequest;
+use App\Exceptions\InsufficientFundsException;
+use App\Exceptions\InsufficientHoldingsException;
+use App\Http\Requests\StoreTransactionRequest;
 use App\Http\Resources\TransactionResource;
 use App\Models\Client;
 use App\Models\Instrument;
-use App\Services\TransactionService;
+use App\Models\Transaction;
+use Brick\Math\RoundingMode;
+use Brick\Money\Money;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 
 class TransactionController extends Controller
 {
-    public function __construct(
-        private readonly TransactionService $transactions,
-    ) {}
-
-    /**
-     * History, paginated, oldest first — matches the ledger's own append
-     * order and the transactions(client_id, created_at) composite index
-     * built for exactly this read pattern.
-     */
     public function index(Client $client): AnonymousResourceCollection
     {
         return TransactionResource::collection(
-            $client->transactions()->orderBy('id')->paginate()
+            $client->transactions()->with('instrument')->orderBy('id')->paginate()
         );
     }
 
-    public function store(CreateTransactionRequest $request, Client $client): JsonResponse
+    public function store(StoreTransactionRequest $request, Client $client): JsonResponse
     {
         $type = TransactionType::from($request->validated('type'));
 
         $transaction = match ($type) {
-            TransactionType::Deposit => $this->transactions->deposit($client, $request->validated('amount')),
-            TransactionType::Withdrawal => $this->transactions->withdraw($client, $request->validated('amount')),
-            TransactionType::Buy => $this->transactions->buy(
+            TransactionType::Deposit => $this->deposit($client, $request->validated('amount')),
+            TransactionType::Withdrawal => $this->withdraw($client, $request->validated('amount')),
+            TransactionType::Buy => $this->buy(
                 $client,
                 Instrument::findOrFail($request->validated('instrument_id')),
                 $request->validated('quantity'),
                 $request->validated('price'),
             ),
-            TransactionType::Sell => $this->transactions->sell(
+            TransactionType::Sell => $this->sell(
                 $client,
                 Instrument::findOrFail($request->validated('instrument_id')),
                 $request->validated('quantity'),
@@ -53,5 +49,85 @@ class TransactionController extends Controller
         return TransactionResource::make($transaction)
             ->response()
             ->setStatusCode(201);
+    }
+
+    private function deposit(Client $client, string $amount): Transaction
+    {
+        return DB::transaction(function () use ($client, $amount) {
+            Client::lockForUpdate()->findOrFail($client->id);
+
+            return Transaction::create([
+                'client_id' => $client->id,
+                'type' => TransactionType::Deposit,
+                'amount' => $amount,
+                'transaction_fee' => 0,
+            ]);
+        });
+    }
+
+    private function withdraw(Client $client, string $amount): Transaction
+    {
+        return DB::transaction(function () use ($client, $amount) {
+            $locked = Client::lockForUpdate()->findOrFail($client->id);
+
+            $balance = $locked->cash_balance;
+            $requested = Money::of($amount, $locked->currency);
+
+            if ($requested->isGreaterThan($balance)) {
+                throw new InsufficientFundsException($locked, $requested, $balance);
+            }
+
+            return Transaction::create([
+                'client_id' => $locked->id,
+                'type' => TransactionType::Withdrawal,
+                'amount' => $amount,
+                'transaction_fee' => 0,
+            ]);
+        });
+    }
+
+    private function buy(Client $client, Instrument $instrument, int $quantity, string $price): Transaction
+    {
+        return DB::transaction(function () use ($client, $instrument, $quantity, $price) {
+            $locked = Client::lockForUpdate()->findOrFail($client->id);
+
+            $total = Money::of($price, $locked->currency)->multipliedBy($quantity, RoundingMode::Unnecessary);
+            $balance = $locked->cash_balance;
+
+            if ($total->isGreaterThan($balance)) {
+                throw new InsufficientFundsException($locked, $total, $balance);
+            }
+
+            return Transaction::create([
+                'client_id' => $locked->id,
+                'type' => TransactionType::Buy,
+                'instrument_id' => $instrument->id,
+                'quantity' => $quantity,
+                'price' => $price,
+                'transaction_fee' => 0,
+            ]);
+        });
+    }
+
+    private function sell(Client $client, Instrument $instrument, int $quantity, string $price): Transaction
+    {
+        return DB::transaction(function () use ($client, $instrument, $quantity, $price) {
+            $locked = Client::lockForUpdate()->findOrFail($client->id);
+
+            $held = $locked->holdings->firstWhere('instrument_id', $instrument->id)->quantity ?? 0;
+
+            if ($quantity > $held) {
+                throw new InsufficientHoldingsException($locked, $instrument, $quantity, $held);
+            }
+
+            return Transaction::create([
+                'client_id' => $locked->id,
+                'type' => TransactionType::Sell,
+                'instrument_id' => $instrument->id,
+                'quantity' => $quantity,
+                'price' => $price,
+                'transaction_fee' => 0,
+            ]);
+        });
     }
 }

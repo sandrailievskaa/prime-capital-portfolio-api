@@ -5,12 +5,6 @@ namespace Tests\Concerns;
 use App\Models\Client;
 use App\Models\Instrument;
 
-/**
- * Trivial object-construction helpers only — no business logic hidden
- * here. Deposit/buy/sell calls stay as literal HTTP requests inline in
- * each test, not wrapped, so the test body itself stays the readable
- * record of what's being exercised.
- */
 trait CreatesFixtures
 {
     protected function createClient(string $currency = 'USD'): Client
@@ -21,5 +15,10 @@ trait CreatesFixtures
     protected function createInstrument(string $ticker = 'AAPL'): Instrument
     {
         return Instrument::create(['ticker' => $ticker]);
+    }
+
+    protected function holdingQuantity(Client $client, Instrument $instrument): int
+    {
+        return $client->holdings->firstWhere('instrument_id', $instrument->id)->quantity ?? 0;
     }
 }

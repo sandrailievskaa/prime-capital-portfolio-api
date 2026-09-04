@@ -2,14 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Services\PortfolioService;
+use App\Models\Instrument;
+use App\Models\Transaction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\CreatesFixtures;
 use Tests\TestCase;
 
 class TransactionCreationTest extends TestCase
 {
-    use RefreshDatabase, CreatesFixtures;
+    use CreatesFixtures, RefreshDatabase;
 
     // ── Valid cases ─────────────────────────────────────────────────────
 
@@ -27,17 +28,6 @@ class TransactionCreationTest extends TestCase
         $this->assertBalance($client, '250.00');
     }
 
-    /**
-     * Regression test (Phase 8, found via adversarial QA):
-     * Transaction::create() returns the in-memory instance built from the
-     * attributes passed to it — it does NOT re-fetch DB-computed column
-     * defaults after INSERT. Every TransactionService write method now
-     * passes transaction_fee explicitly for exactly this reason; before
-     * that fix, every successful response showed transaction_fee: null
-     * even though the actual DB row correctly held 0.00. This test checks
-     * both sides: the API response and a fresh read of the same row from
-     * the database.
-     */
     public function test_transaction_fee_shows_zero_not_null_in_the_response_and_matches_the_database(): void
     {
         $client = $this->createClient();
@@ -49,7 +39,7 @@ class TransactionCreationTest extends TestCase
 
         $response->assertJsonPath('data.transaction_fee', '0.00');
 
-        $fresh = \App\Models\Transaction::find($response->json('data.id'));
+        $fresh = Transaction::find($response->json('data.id'));
         $this->assertSame('0.00', (string) $fresh->transaction_fee);
     }
 
@@ -66,10 +56,6 @@ class TransactionCreationTest extends TestCase
         $this->assertBalance($client, '300.00');
     }
 
-    /**
-     * CLAUDE.md regression seed (Phase 4): the boundary is a success, not
-     * a rejection.
-     */
     public function test_withdrawal_exactly_equal_to_balance_succeeds_landing_on_zero(): void
     {
         $client = $this->createClient();
@@ -100,10 +86,6 @@ class TransactionCreationTest extends TestCase
         $this->assertHolding($client, $instrument->id, 3);
     }
 
-    /**
-     * Same boundary principle as the withdrawal regression seed, applied
-     * to buy: spending exactly the full balance is a success.
-     */
     public function test_buy_costing_exactly_available_cash_succeeds_landing_on_zero(): void
     {
         $client = $this->createClient();
@@ -140,14 +122,7 @@ class TransactionCreationTest extends TestCase
         $this->assertHolding($client, $instrument->id, 6);
     }
 
-    /**
-     * CLAUDE.md regression seed (Phase 5, HAVING-alias bug): selling the
-     * full holding must succeed and leave the instrument absent, not
-     * present with quantity 0. This test only checks the write succeeds
-     * and the total row disappears from a fresh holdings() computation —
-     * the dedicated absence-in-response assertion already lives in
-     * PortfolioZeroHoldingsTest and is not duplicated here.
-     */
+    /** Absence-in-response is asserted separately in PortfolioZeroHoldingsTest. */
     public function test_selling_exactly_the_full_holding_succeeds(): void
     {
         $client = $this->createClient();
@@ -162,7 +137,7 @@ class TransactionCreationTest extends TestCase
             'price' => '100.00',
         ])->assertStatus(201);
 
-        $holdings = app(PortfolioService::class)->holdings($client);
+        $holdings = $client->holdings;
         $this->assertFalse($holdings->contains('instrument_id', $instrument->id));
     }
 
@@ -268,12 +243,6 @@ class TransactionCreationTest extends TestCase
             ->assertJsonValidationErrors(['price', 'quantity']);
     }
 
-    /**
-     * Adversarial QA (Phase 8): transaction_fee is not in
-     * CreateTransactionRequest::rules(), so it must be rejected by the
-     * same unknown-field mechanism as any other unrecognized key — never
-     * silently accepted or silently ignored.
-     */
     public function test_transaction_fee_is_rejected_as_an_unknown_field_on_deposit(): void
     {
         $client = $this->createClient();
@@ -303,10 +272,6 @@ class TransactionCreationTest extends TestCase
 
     // ── Atomicity: rejections leave zero trace ──────────────────────────
 
-    /**
-     * Highest-risk case #4: a rejected write must not move the needle on
-     * anything — no row, no balance change, no count change.
-     */
     public function test_rejected_withdrawal_leaves_zero_trace(): void
     {
         $client = $this->createClient();
@@ -389,17 +354,14 @@ class TransactionCreationTest extends TestCase
 
     private function assertBalance($client, string $expected): void
     {
-        $this->assertSame(
-            $expected,
-            (string) app(PortfolioService::class)->cashBalance($client)->getAmount()
-        );
+        $this->assertSame($expected, (string) $client->cash_balance->getAmount());
     }
 
     private function assertHolding($client, int $instrumentId, int $expectedQuantity): void
     {
         $this->assertSame(
             $expectedQuantity,
-            app(PortfolioService::class)->holdingQuantity($client, \App\Models\Instrument::find($instrumentId))
+            $this->holdingQuantity($client, Instrument::find($instrumentId))
         );
     }
 }

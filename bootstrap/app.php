@@ -22,13 +22,11 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
 
-        // Machine-readable error_code envelope, same shape as
-        // CreateTransactionRequest::failedValidation() — no per-field
-        // `errors` here since this is a whole-request business decision,
-        // not a field-validation failure. Registered against the base
-        // class so InsufficientHoldingsException (Phase 5) and any future
-        // DomainRuleException subclass is handled automatically — no
-        // second render() registration needed.
+        // Same {error_code, message} shape as StoreTransactionRequest's
+        // failedValidation(), minus `errors` — this is a whole-request
+        // business decision, not a field-validation failure. Registered
+        // against the base class, so any DomainRuleException subclass is
+        // handled automatically with no second render() registration.
         $exceptions->render(function (DomainRuleException $e, Request $request) {
             return response()->json([
                 'error_code' => $e->errorCode(),
@@ -36,11 +34,9 @@ return Application::configure(basePath: dirname(__DIR__))
             ], 422);
         });
 
-        // Route-model-binding misses (e.g. POST /clients/999999/...) throw
-        // ModelNotFoundException, which Laravel's handler converts to this
-        // class before dispatching to render() — without this, APP_DEBUG=true
-        // leaks a full stack trace (file paths included) into the JSON body
-        // even though the status code is already correctly 404.
+        // Without this, APP_DEBUG=true leaks a full stack trace into the
+        // JSON body on a route-model-binding miss, even though the status
+        // code is already correctly 404.
         $exceptions->render(function (NotFoundHttpException $e, Request $request) {
             return response()->json([
                 'error_code' => 'not_found',
