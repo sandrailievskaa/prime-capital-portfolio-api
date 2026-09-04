@@ -174,7 +174,15 @@ representation in a float), so `decimal:2` cannot reliably enforce "exactly
 has no equivalent issue (JSON integers don't lose precision) and stays a
 plain number. This is the same reasoning ADR-002 already established for
 internal arithmetic (`brick/money` never accepts a float) — it turns out to
-apply at the HTTP boundary too, not just inside the codebase. Carry this
+apply at the HTTP boundary too, not just inside the codebase. **Caveat found
+in Phase 7:** testing the `decimal:2`/regex rules in isolation (calling the
+validator directly, bypassing HTTP) makes leading/trailing whitespace
+(`" 10.50"`, `"10.50 "`) look like it fails — but Laravel's global
+`TrimStrings` middleware normalizes both to `"10.50"` before
+`CreateTransactionRequest` ever runs, so through the real request pipeline
+they correctly succeed (201, not 422). Don't re-derive a whitespace-rejects
+conclusion from isolated validator testing — it doesn't hold for the actual
+system. Carry this
 exact request shape through Phase 4/5 (service layer) and Phase 6/10
 (endpoint examples, README) without re-deciding it.
 
